@@ -1,6 +1,6 @@
 # Copy Fail (CVE-2026-31431) 内核漏洞复现环境
 
-> 本项目提供一个完整的 Linux 内核漏洞复现与调试环境，用于复现 Copy Fail（CVE-2026-31431），支持 QEMU + GDB 动态调试。
+> 本项目提供一个完整的 Linux 内核漏洞复现与调试环境，用于复现 Copy Fail（CVE-2026-31431），支持 QEMU + GDB 动态调试,使人更加容易理解和学习此漏洞。
 
 ---
 
@@ -13,7 +13,7 @@ Copy Fail（CVE-2026-31431）是一个 Linux 内核本地提权漏洞：
 - 类型：逻辑漏洞（非 race）
 - 模块：`algif_aead`（AF_ALG 接口）
 
----
+debootstrap---
 
 # 🧠 为什么选择 6.6.1
 
@@ -96,24 +96,29 @@ make defconfig
 然后一键写入所有必需配置：
 
 ```bash
-cat >> .config <<'EOF'
-CONFIG_BLK_DEV_INITRD=y
-CONFIG_DEVTMPFS=y
-CONFIG_DEBUG_INFO=y
-CONFIG_CRYPTO_USER_API_AEAD=y
-CONFIG_CRYPTO_USER_API=y
-CONFIG_VIRTIO=y
-CONFIG_VIRTIO_PCI=y
-CONFIG_VIRTIO_BLK=y
-CONFIG_EXT4_FS=y
-CONFIG_NET_9P=y
-CONFIG_NET_9P_VIRTIO=y
-CONFIG_9P_FS=y
-CONFIG_RANDOMIZE_BASE=n
-EOF
-
+./scripts/config --enable CONFIG_BLK_DEV_INITRD
+./scripts/config --enable CONFIG_DEVTMPFS
+./scripts/config --enable CONFIG_DEBUG_INFO
+./scripts/config --enable CONFIG_CRYPTO_USER_API_AEAD
+./scripts/config --enable CONFIG_CRYPTO_USER_API
+./scripts/config --enable CONFIG_VIRTIO
+./scripts/config --enable CONFIG_VIRTIO_PCI
+./scripts/config --enable CONFIG_VIRTIO_BLK
+./scripts/config --enable CONFIG_EXT4_FS
+./scripts/config --enable CONFIG_NET_9P
+./scripts/config --enable CONFIG_NET_9P_VIRTIO
+./scripts/config --enable CONFIG_9P_FS
+./scripts/config --disable CONFIG_RANDOMIZE_BASE
+./scripts/config --enable CONFIG_FTRACE
+./scripts/config --enable CONFIG_FUNCTION_TRACER
+./scripts/config --enable CONFIG_FUNCTION_GRAPH_TRACER
+./scripts/config --enable CONFIG_DYNAMIC_FTRACE
+# 2. 自动解决依赖冲突并更新 .config
 make olddefconfig
+
 ```
+
+
 
 ---
 
@@ -131,8 +136,8 @@ make -j$(nproc)
 ---
 
 # 📦 七、构建 rootfs（debootstrap 定制方案）
-
-使用 debootstrap 从零构建极简 rootfs，仅包含漏洞复现所需的最小包集，排除 cloud-init / systemd 冗余服务等干扰。
+[build_rootfs](./build_rootfs.sh)是一键配置脚本
+使用  从零构建极简 rootfs，仅包含漏洞复现所需的最小包集，排除 cloud-init / systemd 冗余服务等干扰。
 
 ## 7.1 debootstrap 构建最小系统
 
@@ -153,8 +158,8 @@ sudo chroot ubuntu-rootfs /bin/bash -c '
     echo "copyfail" > /etc/hostname
 
     echo "root:root" | chpasswd
-    useradd -m -s /bin/bash bob
-    echo "bob:test" | chpasswd
+    useradd -m -s /bin/bash asdf
+    echo "asdf:test" | chpasswd
 
     echo "none /dev devtmpfs defaults 0 0" > /etc/fstab
 
@@ -172,15 +177,16 @@ mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 mount -t debugfs none /sys/kernel/debug
+# tracefs 已包含在 debugfs 中，路径为 /sys/kernel/debug/tracing/
 mkdir -p /mnt/shared
 mount -t 9p -o trans=virtio shared /mnt/shared
 
 echo ""
 echo "[+] Copy Fail Lab Ready (debootstrap)"
 echo "[+] Shared dir mounted at /mnt/shared"
-echo "[+] Logged in as: bob (unprivileged)"
+echo "[+] Logged in as: asdf (unprivileged)"
 echo ""
-exec su -l bob
+exec su -l asdf
 INITEOF'
 
 sudo chmod +x ubuntu-rootfs/init
@@ -269,7 +275,7 @@ mkdir -p shared
 ./run.sh
 ```
 
-等 QEMU 终端出现 `bob@(none):~$` 提示符。
+等 QEMU 终端出现 `asdf@(none):~$` 提示符。
 
 **Step 2** — VS Code 按 `Ctrl+Shift+D`，顶部选 **"QEMU Kernel Debug"**，按 **F5** 连接。
 
@@ -301,7 +307,7 @@ VS Code 会在断点处暂停，可图形化查看变量、调用栈、内存。
 gdb ./linux-6.6.1/vmlinux -ex "target remote :1234" -ex "continue"
 ```
 
-等终端 1 出现 `bob@` 提示符后，终端 2 按 `Ctrl+C` 暂停内核，设断点：
+等终端 1 出现 `asdf@` 提示符后，终端 2 按 `Ctrl+C` 暂停内核，设断点：
 
 ```gdb
 b _aead_recvmsg
@@ -313,13 +319,16 @@ continue
 
 # 🔥 九、触发漏洞
 
-**终端 1**（QEMU 虚拟机内，已自动以 bob 身份登录）直接执行 exploit：
+**终端 1**（QEMU 虚拟机内，已自动以 asdf 身份登录）直接执行 exploit：
+
+来自`https://copy.fail/#exploit`或者`https://github.com/theori-io/copy-fail-CVE-2026-31431/blob/main/copy_fail_exp.py`
+放到shared/exp.py中
 
 ```bash
 python3 /mnt/shared/exp.py
 ```
 
-> init 脚本已自动完成：挂载 proc/sys/dev/debugfs、挂载 9p 共享目录、切换到 bob 用户。无需手动操作。
+> init 脚本已自动完成：挂载 proc/sys/dev/debugfs、挂载 9p 共享目录、切换到 asdf 用户。无需手动操作。
 
 ---
 

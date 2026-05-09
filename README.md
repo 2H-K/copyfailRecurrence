@@ -1,21 +1,10 @@
 # 内核漏洞复现环境
 
-> 本项目提供一个完整的 Linux 内核漏洞复现与调试环境，用于复现 Copy Fail（CVE-2026-31431），支持 QEMU + GDB 动态调试,使人更加容易理解和学习此漏洞。
+> 本项目提供一个完整的 Linux 内核漏洞复现与调试环境，用于复现 Copy Fail & DirtyFrag，支持 QEMU + GDB 动态调试,使人更加容易理解和学习此漏洞。
 
 参考文章:
 https://copy.fail/
 https://github.com/V4bel/dirtyfrag/tree/master
-
----
-
-# 📌 漏洞简介
-
-Copy Fail（CVE-2026-31431）是一个 Linux 内核本地提权漏洞：
-
-- 影响范围：Linux 4.14 ~ 6.18 修复前
-- 利用方式：普通用户 → root
-- 类型：逻辑漏洞（非 race）
-- 模块：`algif_aead`（AF_ALG 接口）
 
 ---
 
@@ -97,7 +86,11 @@ cd linux-6.6.1
 make defconfig
 ```
 
-然后一键写入所有必需配置：
+## 图形化配置
+[配置说明](./config_kernel.md)
+
+## 脚本配置
+手动脚本写入所有必需配置(有遗漏,btf无法开启,不推荐)：
 
 ```bash
 #!/bin/bash
@@ -118,6 +111,8 @@ make defconfig
 # ========================================
 # 区块2: 调试支持（可选）
 # ========================================
+./scripts/config --disable CONFIG_DEBUG_INFO_NONE
+./scripts/config --enable CONFIG_DEBUG_INFO_DWARF4
 ./scripts/config --enable CONFIG_DEBUG_INFO
 ./scripts/config --enable CONFIG_FTRACE
 ./scripts/config --enable CONFIG_FUNCTION_TRACER
@@ -131,7 +126,6 @@ make defconfig
   --enable CONFIG_BPF \
   --enable CONFIG_BPF_SYSCALL \
   --enable CONFIG_BPF_JIT \
-  --enable CONFIG_HAVE_EBPF_JIT \
   --enable CONFIG_BPF_EVENTS \
   --enable CONFIG_KPROBES \
   --enable CONFIG_KPROBE_EVENTS \
@@ -139,9 +133,7 @@ make defconfig
   --enable CONFIG_UPROBE_EVENTS \
   --enable CONFIG_DEBUG_FS \
   --enable CONFIG_FTRACE_SYSCALLS \
-  --enable CONFIG_HAVE_DYNAMIC_FTRACE \
-  --enable CONFIG_HAVE_KPROBES \
-  --enable CONFIG_ARCH_SUPPORTS_UPROBES
+  --enable CONFIG_DEBUG_INFO_BTF
 
 # ========================================
 # 区块4: DirtyFrag 漏洞复现（可选）
@@ -152,6 +144,27 @@ make defconfig
 ./scripts/config --enable CONFIG_INET6_ESP
 ./scripts/config --enable CONFIG_AF_RXRPC
 ./scripts/config --enable CONFIG_KEYS
+# user namespace（修复 unshare: Invalid argument）
+./scripts/config --enable CONFIG_USER_NS
+./scripts/config --enable CONFIG_NET_NS
+./scripts/config --enable CONFIG_PID_NS
+./scripts/config --enable CONFIG_UTS_NS
+./scripts/config --enable CONFIG_IPC_NS
+./scripts/config --enable CONFIG_MOUNT_NS
+
+# rxrpc/rxkad 真正依赖
+./scripts/config --enable CONFIG_RXKAD
+
+# keyring runtime
+./scripts/config --enable CONFIG_PERSISTENT_KEYRINGS
+./scripts/config --enable CONFIG_BIG_KEYS
+
+# 建议补充（避免 crypto/runtime 缺依赖）
+./scripts/config --enable CONFIG_CRYPTO
+./scripts/config --enable CONFIG_CRYPTO_MANAGER
+
+# IPv6（RXRPC 某些路径会依赖）
+./scripts/config --enable CONFIG_IPV6
 
 # ========================================
 # 区块5: CopyFail 漏洞复现（核心）
@@ -362,6 +375,8 @@ VS Code 会在断点处暂停，可图形化查看变量、调用栈、内存。
 
 ```bash
 ./run.sh
+# qemu里检查btf内核是否可用
+cat /sys/kernel/btf/vmlinux 
 ```
 
 **终端 2** — GDB 连接，放行内核启动：
@@ -445,3 +460,6 @@ sudo debootstrap --variant=minbase --include=python3,strace,gcc,make,bpftrace,li
 ## ❌ rootfs 空间不足
 
 debootstrap minbase 约 150-200MB，加上 gcc/bpftrace/make 等约 800-1200MB，`dd count=1536`（1.5GB）通常够用。如需额外包，增大 count 值。
+
+## dirtyfrag 不能触发
+从 9p 文件系统运行 exploit会失败,请将exp编译好copy到/qemu虚拟机/tmp或者其他目录跑,不要在共享目录下运行exp,跑完再执行su即可提权,用`https://github.com/V4bel/dirtyfrag/tree/master`的官方exp

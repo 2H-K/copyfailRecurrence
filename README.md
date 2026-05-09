@@ -215,7 +215,7 @@ make -j$(nproc)
 
 # 📦 七、构建 rootfs（debootstrap 定制方案）
 [build_rootfs](./build_rootfs.sh)是一键配置脚本
-使用  从零构建极简 rootfs，仅包含漏洞复现所需的最小包集，排除 cloud-init / systemd 冗余服务等干扰。
+
 
 ## 7.1 debootstrap 构建最小系统
 
